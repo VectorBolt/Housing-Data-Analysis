@@ -1,0 +1,395 @@
+---
+title: "A Study of Data from the 2019 American Housing Survey"
+subtitle: "By Avneesh Verma"
+output:
+  html_notebook: default
+  pdf_document: default
+  md_document: default
+  html_document:
+    df_print: paged
+---
+
+# Introduction
+This report is an analysis of data from the 2019 American Housing Survey, conducted by the U.S. Census Bureau. This is a longitudinal survey that studies the same set of housing units every other year. We hypothesize that there is a positive correlation between the market value of a family's house and the family's annual income. This is a large dataset that with over 60,000 rows (one for each household) and 1,000 columns (fields for each household). This analysis focuses on a few variables of interest: Family Income, Market Value, Monthly Housing Costs, and Unit Size.
+
+```{r echo=FALSE}
+# Load Dataset
+original_data <- read.csv("household.csv")
+#head(original_data)
+```
+
+## Cleaning up data
+
+The quantitative variables to be investigated are Family Income (Past 12 Months), Current Market Value of Unit, and Monthly Total Housing Costs (which is the sum of variables like Mortgage, Rent, Insurance, and Maintenance amounts per month). In this dataset, the number -6 represents "Not Applicable". Thus, a copy of the data will be created, and all the rows that have -6 for Income, Market Value, and Monthly Housing Costs will be removed from this copy.
+
+```{r, echo=FALSE, results = 'asis'}
+data <- original_data[!(original_data$FINCP == -6 | original_data$MARKETVAL == -6 | original_data$TOTHCAMT == -6),]
+message(
+  "* ", nrow(original_data[original_data$FINCP == -6,]), " households have Family Income listed as 'Not Applicable', which is ",
+  round(100*nrow(original_data[original_data$FINCP == -6,])/(nrow(original_data)-1), digits=1), "% of the total number of households."
+)
+message(
+  "* ", nrow(original_data[original_data$MARKETVAL == -6,]), " households have Market Value listed as 'Not Applicable', which is ",
+  round(100*nrow(original_data[original_data$MARKETVAL == -6,])/(nrow(original_data)-1), digits=1), "% of the total number of households."
+)
+message(
+  "* ", nrow(original_data[original_data$TOTHCAMT == -6,]), " households have Monthly Housing Costs as 'Not Applicable', which is ",
+  round(100*nrow(original_data[original_data$TOTHCAMT == -6,])/(nrow(original_data)-1), digits=1), "% of the total number of households."
+)
+message(
+  "* ", "In total, there are ", nrow(data)-1, " households remaining in this filtered copy of the dataset. The original dataset had ",
+  nrow(original_data)-1, " households. Thus, ", (nrow(original_data)-1) - (nrow(data)-1), " households have been removed. ", 
+  round(100*(nrow(data)-1)/(nrow(original_data)-1), digits=2), "% of the original data remains in this filtered copy."
+)
+```
+
+# One Variable Analysis
+
+## Income
+
+First, a histogram of "Family Income (Past 12 Months)" will be studied. This is the sum of all types of income for the householder and all related individuals age 16 and over.
+
+*Caution:* We have also decided to remove **all** households whose income values are less than 0 (not just the ones that have -6). This is because it is not explained how households have negative income, and there is no way to distinguish between households that have an actual income of -\$6 and households for which income is "Not Applicable". This is not a serious omission of data since there are very few households whose incomes are listed as negative numbers that are not -6:
+
+```{r echo=FALSE}
+# Remove all households for which FINCP < 0
+data <- data[!(data$FINCP < 0),]
+message(
+  "Number of households with negative income (not including -6): ",
+  nrow(original_data[(original_data$FINCP < 0 & original_data$FINCP != -6),])
+)
+income <- c(data$FINCP)
+#for (val in income) {
+#  if (val < 0) {
+#    print(val)
+#  }
+#}
+```
+
+Now let's take a look at the histogram:
+
+```{r}
+options(scipen=5) # To avoid scientific notation x ticks
+hist(
+  income, main="Histogram of Income", 
+  xlab="Family Income (Past 12 Months)", ylab = "Counts", breaks=150
+  )
+```
+
+```{r, echo=FALSE}
+message("The mean Family Income is $", round(mean(income), 2))
+message("The standard deviation of Family Income is $", round(sd(income), 2))
+```
+
+Clearly, the data is highly skewed to the right (which is not surprising for a variable like income). This results in a standard deviation that is greater than the mean. We will re-express the data by looking at a histogram of the log of income (base 10). Since we cannot take the logarithm of income values of "0", we'll first add a constant of 1 to each income value before taking the logarithm. This re-expressed data looks much more normal:
+
+```{r, results='asis'}
+log_income <- log(income+1, base=10)
+hist(
+  log_income, breaks=150, main="Histogram of Log(Income+1)",
+  ylab = "Counts", xlab = "Log(Income+1)"
+)
+```
+
+```{r, echo=FALSE}
+message("The mean of Log(Family Income+1) is ", mean(log_income))
+message("The standard deviation of Log(Family Income+1) is ", sd(log_income))
+```
+
+There is a big spike at "0", which represents all of the households who reported a family income of \$0 over the past 12 months. If we remove this outlier, the histogram looks and like this:
+
+```{r}
+data_positive_income <- data[!(data$FINCP <= 0),]
+log_income_no_zero = log(data_positive_income$FINCP, base=10)
+hist(
+  log_income_no_zero, breaks=150, main="Histogram of Log(Income) excluding incomes of 0",
+  ylab = "Counts", xlab = "Log(Income)"
+)
+```
+
+```{r, echo=FALSE}
+message("The mean of Log(Family Income) excluding incomes of $0 is ", mean(log_income_no_zero))
+message("The standard deviation of Log(Family Income) excluding incomes of $0 is ", sd(log_income_no_zero))
+```
+This outlier spike at 0 had pulled the mean to the low end, so removing these outliers results in a larger mean and a smaller standard deviation. 
+
+Let's take a look at the relationship between income and house size. In this dataset, unit size (in square footage) is reported as a categorical variable, with each category representing an interval in square feet:
+
+-   '-9': Not Reported
+-   '1': Less than 500 square feet
+-   '2': 500 to 749 square feet
+-   '3': 750 to 999 square feet
+-   '4': 1,000 to 1,499 square feet
+-   '5': 1,500 to 1,999 square feet
+-   '6': 2,000 to 2,499 square feet
+-   '7': 2,500 to 2,999 square feet
+-   '8': 3,000 to 3,999 square feet
+-   '9': 4,000 square feet or more
+
+We hypothesize that there is a positive association between unit size and family income. It seems reasonable that families that make more money would purchase larger houses.
+```{r}
+boxplot(income ~ data$UNITSIZE, xlab = "Unit size", ylab = "Family Income", pch=20)
+```
+
+This is hard to interpret, so we'll plot Log(Income+1) against unit size instead.
+
+```{r}
+bp <- boxplot(
+  log_income ~ data$UNITSIZE, 
+  xlab = "Unit size", ylab = "Log(Family Income + 1)", pch=20
+)
+```
+
+```{r, echo=FALSE}
+cat("Medians: \n")
+cat(bp$stats[3,])
+cat("\n\n")
+cat("Interquartile Ranges: \n")
+cat(bp$stats[4,] - bp$stats[2,])
+```
+
+Notice: as square footage increases, the log of median family income also tends to increase (excluding the -9 bracket, since that represents all households for which unit size is not reported.). Thus, our hypothesis appears to be correct.
+
+One surprising result is that as square footage increases, the interquartile range of Log(Family Income + 1) tends to decrease. One exception to this rule is the '9' bracket, since it represents all households which have a unit size greater than 4000 square feet, while the other brackets have a fixed upper limit of square feet. Bracket '8' is also an exception, because the range of square footage in this bracket is 1000 square feet, while the ranges of square footage in the most of the other brackets are 500 square feet. Bracket '3' is also an exception, for unknown reasons. 
+
+One possible explanation for this negative association between the interquartile ranges and unit sizes is that the smaller spread for larger unit sizes is a result of the cost barrier blocking people from purchasing these houses. In other words, a family that makes a lot of money may still *choose* to live in a home of modest size (resulting in a greater spread in incomes for smaller house sizes). However, a family that makes a small amount of money simply *cannot afford* to buy and live in a bigger house, resulting in the market for larger homes being dominated solely by wealthier families.
+
+## Market Value
+
+Next, let's study the variable respresenting "Current Market Value of Unit". First, let's look at the five number summary.
+
+```{r, echo=FALSE}
+market_val <- data$MARKETVAL
+market_val_fivenum <- fivenum(market_val)
+message("Min: ", (market_val_fivenum[1]))
+message("Q1: ", market_val_fivenum[2])
+message("Median: ", market_val_fivenum[3])
+message("Q3: ", market_val_fivenum[4])
+message("Max: ", market_val_fivenum[5])
+```
+
+In our dataset, the number 9,999,998 actually represents all house prices including *or greater than* that number. Thus, we will remove all households with values of 9,999,998 since it is impossible to know their actual price.
+
+```{r, echo=FALSE}
+data <- data[!(data$MARKETVAL == 9999998),]
+message(
+  nrow(original_data[original_data$MARKETVAL == 9999998,]), " households have Monthly Housing Costs listed as '9999998', which rounds down to ",
+  round(100*nrow(original_data[original_data$MARKETVAL == 9999998,])/(nrow(original_data)-1), digits=1), "% of the total number of households."
+)
+```
+
+Since there are only 21 houses with market values listed as "9,999,998", removing them is not a significant omission. Here's the new five number summary:
+
+```{r, echo=FALSE}
+new_market_val_fivenum <- fivenum(data$MARKETVAL)
+message("Min: ", (new_market_val_fivenum[1]))
+message("Q1: ", new_market_val_fivenum[2])
+message("Median: ", new_market_val_fivenum[3])
+message("Q3: ", new_market_val_fivenum[4])
+message("Max: ", new_market_val_fivenum[5])
+```
+
+The five number summary reveals a few key facts:
+* There are no houses with a market value less than $1000 in the dataset. Perhaps those conducting the survey did not consider houses cheaper than \$1000 to be "valid" homes that could be put on the market. 
+* About 25% of houses have a market value less than \$148,991.50, and about 25% of houses have a market value greater than \$439,911.00. The middle 50% of houses have market values between those two values.
+* About 50% of houses have market values below \$262,054.00, and 50% of houses have market values above that number.
+* The most expensive house remaining in the dataset (after all of the aforementioned filters) has a market value of \$9,991,165.00.
+* The median in this five number summary (262054is very close to the median in the previous five number summary
+
+Now, let's look at the boxplot:
+
+```{r}
+boxplot(market_val)
+```
+
+This boxplot is not very helpful, so let's look at the histogram.
+
+```{r}
+hist(
+  market_val, breaks=150, main='Histogram of Market Value', xlab='Market Value'
+)
+```
+```{r, echo=FALSE}
+message("The mean of Market Value is ", mean(market_val))
+message("The standard deviation of Market Value is ", sd(market_val))
+```
+
+Like Income, this is skewed to the right, so we'll re-express it by taking the logarithm (base 10). We don't need to worry about zeroes since the minimum is \$1000.
+
+```{r}
+log_market_val <- log(market_val, base=10)
+hist(
+  log_market_val, breaks=150, 
+  main="Histogram of Log(Market Value)", xlab = "Log(Market Value)"
+)
+```
+```{r, echo=FALSE}
+message("The mean of Log(Market Value) is ", mean(log_market_val))
+message("The standard deviation of Log(Market Value) is ", sd(log_market_val))
+```
+
+Again, this looks much more normal. Notice that the x-axis begins at 3 because the minimum market value was 1000. It ends at 7 because the maximum was very close to 10,000,000. There are little peaks at the extremes. One possible explanation for the peak at 3 is that many houses with values around or below \$1000 may have had their values rounded up to \$1000. The peak at 7 appears for unkown reasons.
+
+## Housing Costs
+
+Finally, let's look at "Monthly Total Housing Costs". This is the sum of variables like rent, mortgage, monthly utility bill, monthly insurance, monthly maintenance expense, etc.
+
+```{r}
+housing_costs <- data$TOTHCAMT
+hist(
+  data$TOTHCAMT, breaks=150,
+  main = "Histogram of Housing Costs", xlab = "Monthly Total Housing Costs"
+)
+```
+```{r, echo=FALSE}
+message("The mean of Housing Costs is ", mean(housing_costs))
+message("The standard deviation of Housing Costs is ", sd(housing_costs))
+```
+
+Here are some attempts of re-expression.
+
+```{r}
+sqrt_housing_costs = sqrt(housing_costs)
+hist(
+  sqrt_housing_costs, breaks=150,
+  main="Histogram of Sqrt(Housing Costs)", xlab="Sqrt(Monthly Total Housing Costs)"
+)
+```
+
+```{r, echo=FALSE}
+message("The mean of Sqrt(Housing Costs) is ", mean(sqrt_housing_costs))
+message("The standard deviation of Sqrt(Housing Costs) is ", sd(sqrt_housing_costs))
+```
+
+The histogram of $\sqrt{\mathrm{Housing \ Costs}}$ is still skewed to the right, so let's try taking the logarithm.
+
+```{r}
+log_housing_costs = log(housing_costs, 10)
+hist(
+  log_housing_costs, breaks=150,
+  main="Histogram of Log(Housing Costs)", xlab="Log(Monthly Total Housing Costs)"
+)
+```
+
+```{r, echo=FALSE}
+message("The mean of Log(Housing Costs) is ", mean(log_housing_costs))
+message("The standard deviation of Log(Housing Costs) is ", sd(log_housing_costs))
+```
+
+This works better.
+
+# Two Variable Analysis
+Recall: our hypothesis was that there is a positive correlation between the market value of a family's house and the family's annual income.
+
+First, let's compare market value and income.
+
+```{r}
+install.packages("ggplot2")
+library("ggplot2")
+```
+
+```{r}
+income <- data$FINCP
+market_val <- data$MARKETVAL
+plot(
+  income, market_val,
+  main="Market Value vs Income",
+  xlab="Family Income (Past 12 Months)",
+  ylab = "Market Value",
+  pch = 20
+)
+```
+
+It is hard to discern a pattern, so we'll try and re-express the data.
+
+```{r}
+log_income = log(income+1, 10)
+plot(log_income, market_val, pch = 20)
+```
+```{r}
+log_market_val = log(market_val, 10)
+plot(income, log_market_val, pch = 20)
+```
+
+```{r}
+plot(log_income, log_market_val, pch=20)
+```
+Notice the veritcal line on the left, which represents all the households with reported annual incomes of \$0. Despite apparently having no income, some of these households have houses whose market value is over \$1,000,000! This may indicate that many of these households are exploiting loopholes when filing taxes, falsely reporting their incomes as zero. Of course, this is just a hypothesis, and cannot be directly concluded from this data. Further investigation into the finances of these households would be required to confirm or deny this hypothesis.
+
+Since this vertical bar would make the slope of a regression line lower than it would be otherwise, we'll remove these houses when performing our analysis.
+```{r}
+data_positive_income <- data[!(data$FINCP <= 0),]
+log_income_no_zero <- log(data_positive_income$FINCP, 10)
+log_marketval_income_no_zero <- log(data_positive_income$MARKETVAL, 10)
+
+
+reg_marketval_vs_income <- lm(log_marketval_income_no_zero ~ log_income_no_zero)
+plot(log_marketval_income_no_zero ~ log_income_no_zero, pch=20)
+abline(reg_marketval_vs_income, col="blue")
+```
+```{r}
+summary(reg_marketval_vs_income)
+```
+```{r}
+slope <- coef(reg_marketval_vs_income)[2]
+message("The slope of the least-squares regression line is ", slope, ". ")
+message("This implies that each additional ")
+```
+
+```{r}
+# Residual Plot
+plot(log_income_no_zero, resid(reg_marketval_vs_income), pch=20)
+abline(0,0, col="blue")
+```
+
+
+# OTHER
+```{r}
+housing_costs = data$TOTHCAMT
+plot(housing_costs ~ income)
+```
+```{r}
+plot(housing_costs ~ log_income)
+```
+```{r}
+plot(log(housing_costs, 10) ~ log_income)
+```
+```{r}
+plot(housing_costs ~ market_val)
+```
+```{r}
+plot(log(housing_costs, 10) ~ log_market_val, pch=20)
+```
+
+```{r}
+market_val_and_income = data.frame(income, market_val)
+marketval_vs_income <- ggplot(market_val_and_income, aes(x=income, y = market_val)) + 
+  geom_point() + ggtitle("Market Value vs Income") + 
+  xlab("Family Income (Past 12 Months)") + 
+  ylab("Market Value")
+
+marketval_vs_income
+```
+
+```{r}
+logged_market_val_and_income = data.frame(log_income, log_market_val)
+logged_marketval_vs_income <- ggplot(logged_market_val_and_income, aes(x=log_income, y = log_market_val)) + 
+  geom_point() + ggtitle("Log(Market Value) vs Log(Income+1)") + 
+  xlab("Log(Family Income (Past 12 Months) + $1)") + 
+  ylab("Log(Market Value)")
+
+logged_marketval_vs_income
+```
+
+```{r}
+reg <- lm(log_housing_costs[1:500] ~ log_market_val[1:500])
+plot(log_market_val[1:500], log_housing_costs[1:500]) + abline(reg, col="red")
+```
+
+```{r}
+print(summary(reg))
+```
+
+```{r}
+plot(log_income[1:2000], log_market_val[1:2000])
+```
